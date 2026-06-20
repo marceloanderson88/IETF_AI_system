@@ -21,9 +21,9 @@ Stack: **Next.js (Vercel) + Supabase (Postgres/pgvector/Auth) + Gemini + Python 
 - **M1** Banco (migrations 0001–0004) ✅
 - **M2** Ingestão mínima (GAIA + T2TRG) — esqueleto Python ✅
 - **M3** Descoberta explicável (`/api/route` + UI) ✅
-- M4 Artefatos assistidos (reading-pack, draft-message, /trilha)
-- M5 Auth + watches (Fase 2)
-- M6 Acompanhamento contínuo (cron run-watches, digest)
+- **M4** Artefatos assistidos (reading-pack, draft-message, /trilha) ✅
+- **M5** Auth + watches (login magic-link, `/api/watch`, deltas, /torre, known_rgs) ✅
+- **M6** Acompanhamento contínuo (cron run-watches gera alertas FYI) — parcial; falta digest/e-mail
 - M7 Adjacência temática (Fase 3)
 - M8 Ponte IRTF→IETF + hardening
 
