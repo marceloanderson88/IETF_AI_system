@@ -14,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <nav style={{ borderBottom: "1px solid #243140", padding: "12px 20px", display: "flex", gap: 16, fontSize: 14 }}>
           <Link href="/">Descoberta</Link>
           <Link href="/trilha">Trilha</Link>
+          <Link href="/grafo">Grafo</Link>
           <Link href="/torre">Torre</Link>
         </nav>
         {children}

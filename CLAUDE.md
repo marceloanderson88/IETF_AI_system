@@ -24,7 +24,7 @@ Stack: **Next.js (Vercel) + Supabase (Postgres/pgvector/Auth) + Gemini + Python 
 - **M4** Artefatos assistidos (reading-pack, draft-message, /trilha) ✅
 - **M5** Auth + watches (login magic-link, `/api/watch`, deltas, /torre, known_rgs) ✅
 - **M6** Acompanhamento contínuo (cron run-watches gera alertas FYI) — parcial; falta digest/e-mail
-- M7 Adjacência temática (Fase 3)
+- **M7** Adjacência temática (build-graph, `/api/adjacency/[rg]`, /grafo) ✅ — semantic + shared_author; cross_citation pendente de dado
 - M8 Ponte IRTF→IETF + hardening
 
 ## Comandos
