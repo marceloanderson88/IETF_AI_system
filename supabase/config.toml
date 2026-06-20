@@ -1,0 +1,8 @@
+# Supabase project config (preencher project_id com o ref do projeto)
+project_id = "bussola-irtf"
+
+[db]
+major_version = 15
+
+[api]
+enabled = true
