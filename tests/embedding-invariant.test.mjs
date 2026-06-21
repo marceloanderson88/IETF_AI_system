@@ -14,14 +14,14 @@ const root = join(here, "..");
  */
 
 function readColumnDim() {
-  const sql = readFileSync(join(root, "..", "supabase", "migrations", "0003_vector_and_fts.sql"), "utf8");
+  const sql = readFileSync(join(root, "supabase", "migrations", "0003_vector_and_fts.sql"), "utf8");
   const m = sql.match(/vector\((\d+)\)/);
   assert.ok(m, "não achei vector(N) na migration 0003");
   return Number(m[1]);
 }
 
 function readRpcDim() {
-  const sql = readFileSync(join(root, "..", "supabase", "migrations", "0004_match_chunks_rpc.sql"), "utf8");
+  const sql = readFileSync(join(root, "supabase", "migrations", "0004_match_chunks_rpc.sql"), "utf8");
   const m = sql.match(/vector\((\d+)\)/);
   assert.ok(m, "não achei vector(N) na RPC match_chunks");
   return Number(m[1]);

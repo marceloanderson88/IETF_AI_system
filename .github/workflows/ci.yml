@@ -7,9 +7,6 @@ on:
 jobs:
   app:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: app
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -19,7 +16,7 @@ jobs:
         with:
           node-version: "22"
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm test            # invariante de embedding (§6.1)
       - run: pnpm typecheck

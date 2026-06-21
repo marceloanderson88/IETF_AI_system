@@ -34,25 +34,30 @@ Esta é a **versão inicial (MVP)**, pensada para rodar **na Vercel** com **Supa
 # 1. Banco (Supabase)
 supabase db push        # aplica supabase/migrations/*
 
-# 2. App
-cd app
+# 2. App (na raiz do repo)
 cp .env.example .env.local   # preencher as chaves
 pnpm install
 pnpm dev                     # http://localhost:3000
 
 # 3. Ingestão (opcional, popula o corpus)
-cd ../ingestion
+cd ingestion
 pip install -r requirements.txt
 python ingest.py
 ```
 
 ## Estrutura
 
+O app Next.js fica na **raiz** do repositório — a Vercel detecta o framework
+automaticamente, sem precisar configurar Root Directory.
+
 ```
-app/         Next.js (deploy na Vercel; root = app/)
-ingestion/   Python (ietfdata → Supabase) via GitHub Actions
-supabase/    migrations SQL versionadas
-.github/     CI + ingestão agendada
+app/             App Router (páginas + /api)
+lib/             engine, embeddings, llm, clients Supabase
+middleware.ts    refresh de sessão (Supabase Auth)
+package.json     deploy na Vercel
+ingestion/       Python (Datatracker → Supabase) via GitHub Actions
+supabase/        migrations SQL versionadas
+.github/         CI + ingestão agendada
 ```
 
 Veja `CLAUDE.md` para o contexto de desenvolvimento e os milestones M0..M8.

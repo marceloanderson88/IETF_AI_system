@@ -27,7 +27,12 @@ Stack: **Next.js (Vercel) + Supabase (Postgres/pgvector/Auth) + Gemini + Python 
 - **M7** Adjacência temática (build-graph, `/api/adjacency/[rg]`, /grafo) ✅ — semantic + shared_author; cross_citation pendente de dado
 - M8 Ponte IRTF→IETF + hardening
 
+## Estrutura
+- App Next.js na **raiz** do repo (deploy direto na Vercel, sem Root Directory custom):
+  `app/` (router), `lib/`, `middleware.ts`, `package.json`, `tsconfig.json`, `vercel.json`.
+- `ingestion/` (Python) e `supabase/` (migrations) são pastas-irmãs na raiz.
+
 ## Comandos
-- App: `cd app && pnpm dev` | `pnpm build` | `pnpm typecheck` | `pnpm lint`
+- App (na raiz): `pnpm dev` | `pnpm build` | `pnpm typecheck` | `pnpm lint`
 - DB: `supabase db push`
 - Ingestão local: `cd ingestion && python ingest.py`
