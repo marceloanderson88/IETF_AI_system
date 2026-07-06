@@ -5,17 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bussola IETF</title>
   <style>
-    body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#f7faff;color:#0c1736}.wrap{min-height:100vh;display:grid;grid-template-columns:280px 1fr}.side{background:linear-gradient(180deg,#071f44,#04152d);color:#fff;padding:32px}.brand{font-size:26px;font-weight:800}.main{padding:48px}.hero{background:linear-gradient(90deg,#09275b,#195ac2);color:#fff;border-radius:8px;padding:44px;box-shadow:0 18px 46px rgba(22,36,70,.08)}h1{font-size:42px;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}.card{background:#fff;border:1px solid #dce4f2;border-radius:8px;padding:20px}.card b{font-size:24px}.btn{display:inline-block;margin-top:20px;background:#0f63d8;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:800}@media(max-width:800px){.wrap{display:block}.grid{grid-template-columns:1fr}.side{padding:22px}.main{padding:22px}}
+    body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#f7faff;color:#07132f}.loading{min-height:100vh;display:grid;place-items:center;padding:24px}.card{max-width:560px;background:white;border:1px solid #dce4f2;border-radius:8px;padding:28px;box-shadow:0 18px 46px rgba(22,36,70,.08)}.brand{font-size:28px;font-weight:850;color:#061a38}.bar{height:8px;border-radius:99px;background:#edf2f8;overflow:hidden;margin-top:20px}.bar span{display:block;width:62%;height:100%;background:linear-gradient(135deg,#0b62df,#4f46e5)}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <aside class="side"><div class="brand">Bussola IETF</div><p>Navegue. Conecte. Contribua.</p></aside>
-    <main class="main">
-      <section class="hero"><h1>Encontre seu caminho no IETF</h1><p>Demo operacional para descoberta, evidencias, grupos, oportunidades e mapas de adjacencia.</p><a class="btn" href="/api/health">Testar API</a></section>
-      <div class="grid"><article class="card"><b>24</b><p>Acompanhamentos ativos</p></article><article class="card"><b>8.736</b><p>Evidencias indexadas</p></article><article class="card"><b>18</b><p>Adjacencias fortes</p></article></div>
-      <div class="grid"><article class="card"><h2>Descoberta</h2><p>Recomendacoes explicaveis para T2TRG, GAIA e CoRE.</p></article><article class="card"><h2>Mapa</h2><p>Conexoes entre grupos IRTF e pontes IETF.</p></article><article class="card"><h2>Supabase</h2><p>Banco configurado com RLS, fontes, grupos e evidencias.</p></article></div>
-    </main>
-  </div>
+  <div class="loading"><div class="card"><div class="brand">Bussola IETF</div><p>Carregando a experiencia completa do MVP...</p><div class="bar"><span></span></div></div></div>
+  <script>
+    (async function(){
+      try {
+        const url = 'https://raw.githubusercontent.com/marceloanderson88/IETF_AI_system/main/index.html?ts=' + Date.now();
+        const html = await fetch(url, { cache: 'no-store' }).then(r => r.text());
+        document.open(); document.write(html); document.close();
+      } catch (err) {
+        document.body.innerHTML = '<main style="font-family:Segoe UI,Arial,sans-serif;padding:40px"><h1>Bussola IETF</h1><p>Nao foi possivel carregar a aplicacao completa agora. Recarregue a pagina em alguns segundos.</p></main>';
+      }
+    })();
+  </script>
 </body>
 </html>
