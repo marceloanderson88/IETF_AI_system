@@ -1,0 +1,13 @@
+{
+  "name": "bussola-ietf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bussola IETF demo app for IRTF/IETF discovery, monitoring and evidence-backed opportunities.",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
