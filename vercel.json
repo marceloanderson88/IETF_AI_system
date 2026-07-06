@@ -1,6 +1,0 @@
-{
-  "crons": [
-    { "path": "/api/cron/run-watches", "schedule": "0 6 * * 1" },
-    { "path": "/api/cron/build-graph", "schedule": "0 4 * * 0" }
-  ]
-}
