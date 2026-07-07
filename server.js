@@ -19,7 +19,7 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
   res.end(body);
 }
 
-const server = http.createServer(async (req, res) => {
+const requestListener = async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const parseBody = async () => new Promise((resolve) => {
     let body = "";
@@ -141,12 +141,12 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 200, data, mime[path.extname(filePath)] || "application/octet-stream");
   });
-});
+};
 
 if (process.env.VERCEL) {
-  module.exports = server;
+  module.exports = requestListener;
 } else {
-  server.listen(port, () => {
+  http.createServer(requestListener).listen(port, () => {
     console.log(`Bussola IETF running at http://localhost:${port}`);
   });
 }
