@@ -19,6 +19,23 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
   res.end(body);
 }
 
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+// Calls a Postgres RPC through Supabase's REST endpoint. Throws when Supabase
+// is not configured or the call fails, so callers can fall back gracefully.
+async function supabaseRpc(fn, args, key = SUPABASE_KEY) {
+  if (!SUPABASE_URL || !key) throw new Error("supabase_not_configured");
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: key, Authorization: `Bearer ${key}` },
+    body: JSON.stringify(args)
+  });
+  if (!r.ok) throw new Error(`rpc_${r.status}`);
+  return r.json();
+}
+
 const requestListener = async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const parseBody = async () => new Promise((resolve) => {
@@ -55,33 +72,44 @@ const requestListener = async (req, res) => {
   };
 
   if (url.pathname === "/api/discover") {
-    const q = (url.searchParams.get("q") || "privacy telemetry constrained devices").toLowerCase();
-    send(res, 200, JSON.stringify({
-      query: q,
-      generated_at: new Date().toISOString(),
-      candidates: [
-        { acronym: "T2TRG", name: "Thing-to-Thing Research Group", score: q.includes("privacy") ? 0.92 : 0.84, next_action: "Gerar pacote de leitura", evidence: ["T2TRG charter"] },
-        { acronym: "GAIA", name: "Global Access to the Internet for All", score: 0.86, next_action: "Ler discussoes recentes", evidence: ["GAIA meeting materials"] },
-        { acronym: "CoRE", name: "Constrained RESTful Environments", score: 0.78, next_action: "Comparar adjacencia com T2TRG", evidence: ["RFC 9552"] }
-      ]
-    }));
+    const q = url.searchParams.get("q") || "";
+    try {
+      const rows = await supabaseRpc("bussola_search", { q });
+      const grp = rows.filter((r) => r.kind === "group");
+      const ev = rows.filter((r) => r.kind === "evidence");
+      const maxRank = Math.max(0.000001, ...grp.map((g) => g.rank || 0));
+      const candidates = grp.slice(0, 6).map((g) => ({
+        acronym: g.grp,
+        name: g.title.split(" - ").slice(1).join(" - ") || g.title,
+        ecosystem: g.ecosystem,
+        score: g.rank > 0 ? Math.round(55 + 40 * (g.rank / maxRank)) : 0,
+        snippet: g.snippet,
+        url: g.url,
+        evidence: ev.filter((e) => e.grp === g.grp).map((e) => ({ snippet: e.snippet, url: e.url }))
+      }));
+      send(res, 200, JSON.stringify({ query: q, engine: "postgres-fts", generated_at: new Date().toISOString(), candidates }));
+    } catch (err) {
+      send(res, 200, JSON.stringify({ query: q, engine: "unavailable", candidates: null, error: String((err && err.message) || err) }));
+    }
     return;
   }
 
   if (url.pathname === "/api/search") {
-    const q = (url.searchParams.get("q") || "").toLowerCase();
-    const rows = [
-      ...mock.groups.map((g) => ({ type: "Grupo", title: `${g.acronym} - ${g.name}`, text: g.description, tags: g.tags, route: "grupos" })),
-      ...mock.evidence.map((e) => ({ type: "Evidencia", title: e.source, text: e.quote, tags: [e.group, e.type], route: "evidencias" })),
-      ...mock.people.map((p) => ({ type: "Pessoa", title: p.name, text: `${p.org} - ${p.groups.join(", ")}`, tags: p.groups, route: "pessoas" })),
-      ...mock.opportunities.map((o) => ({ type: "Oportunidade", title: o.title, text: `${o.group} - ${o.priority}`, tags: [o.priority], route: "oportunidades" }))
-    ];
-    const terms = q.split(/\s+/).filter(Boolean);
-    const results = rows.filter((item) => {
-      const text = `${item.title} ${item.text} ${(item.tags || []).join(" ")}`.toLowerCase();
-      return !terms.length || terms.some((term) => text.includes(term));
-    });
-    send(res, 200, JSON.stringify({ query: q, count: results.length, results: results.slice(0, 12) }));
+    const q = url.searchParams.get("q") || "";
+    try {
+      const rows = await supabaseRpc("bussola_search", { q });
+      const results = rows.map((r) => ({
+        type: r.kind === "group" ? "Grupo" : "Evidencia",
+        title: r.title,
+        text: r.snippet,
+        tags: r.grp ? [r.grp] : [],
+        route: r.kind === "group" ? "grupos" : "evidencias",
+        rank: r.rank
+      }));
+      send(res, 200, JSON.stringify({ query: q, engine: "postgres-fts", count: results.length, results: results.slice(0, 20) }));
+    } catch (err) {
+      send(res, 200, JSON.stringify({ query: q, engine: "unavailable", results: null, error: String((err && err.message) || err) }));
+    }
     return;
   }
 
