@@ -37,3 +37,40 @@ end $$;
 
 revoke execute on function public.sync_groups(jsonb) from anon, authenticated, public;
 grant execute on function public.sync_groups(jsonb) to service_role;
+
+-- Charter-derived evidence sync. Idempotent per group for source_type='charter':
+-- removes previous charter evidence for the referenced groups and inserts fresh
+-- rows from the charter text (>= 40 chars). Never touches curated 'demo' rows.
+create or replace function public.sync_evidence(payload jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare n integer;
+begin
+  delete from public.evidence e
+  using (
+    select distinct g.id
+    from public.groups g
+    join jsonb_array_elements(payload) x on g.acronym = upper(x->>'acronym')
+  ) t
+  where e.group_id = t.id and e.source_type = 'charter';
+
+  insert into public.evidence (group_id, source_type, claim, excerpt, confidence, evidence_url)
+  select g.id,
+         'charter',
+         g.acronym || ' charter',
+         btrim(x->>'excerpt'),
+         0.90,
+         x->>'url'
+  from jsonb_array_elements(payload) x
+  join public.groups g on g.acronym = upper(x->>'acronym')
+  where length(btrim(coalesce(x->>'excerpt', ''))) >= 40;
+
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+revoke execute on function public.sync_evidence(jsonb) from anon, authenticated, public;
+grant execute on function public.sync_evidence(jsonb) to service_role;

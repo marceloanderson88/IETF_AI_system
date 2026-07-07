@@ -156,6 +156,7 @@ const requestListener = async (req, res) => {
     try {
       const types = type === "all" ? ["rg", "wg"] : [type];
       const payload = [];
+      const evidencePayload = [];
       for (const t of types) {
         const ecosystem = t === "rg" ? "IRTF" : "IETF";
         const upstream = await fetch(`https://datatracker.ietf.org/api/v1/group/group/?state__slug=active&type__slug=${t}&limit=1000&format=json`);
@@ -163,17 +164,24 @@ const requestListener = async (req, res) => {
         const data = await upstream.json();
         for (const o of (data.objects || [])) {
           if (!o.acronym || !o.name) continue;
+          const rawDesc = (o.description || "").trim();
+          const charterUrl = `https://datatracker.ietf.org/group/${o.acronym}/about/`;
           payload.push({
             acronym: o.acronym,
             name: o.name,
             ecosystem,
-            description: (o.description && o.description.trim()) ? o.description.trim() : o.name,
-            charter_url: `https://datatracker.ietf.org/group/${o.acronym}/about/`
+            description: rawDesc || o.name,
+            charter_url: charterUrl
           });
+          // Real evidence only where Datatracker gives substantive charter text.
+          if (rawDesc.length >= 40) {
+            evidencePayload.push({ acronym: o.acronym, excerpt: rawDesc.slice(0, 600), url: charterUrl });
+          }
         }
       }
-      const affected = await supabaseRpc("sync_groups", { payload }, SUPABASE_SERVICE_KEY);
-      send(res, 200, JSON.stringify({ ok: true, source: "datatracker", types, fetched: payload.length, upserted: affected, synced_at: new Date().toISOString() }));
+      const upserted = await supabaseRpc("sync_groups", { payload }, SUPABASE_SERVICE_KEY);
+      const evidence = await supabaseRpc("sync_evidence", { payload: evidencePayload }, SUPABASE_SERVICE_KEY);
+      send(res, 200, JSON.stringify({ ok: true, source: "datatracker", types, fetched: payload.length, upserted, evidence, synced_at: new Date().toISOString() }));
     } catch (err) {
       send(res, 200, JSON.stringify({ ok: false, error: String((err && err.message) || err) }));
     }
