@@ -148,7 +148,35 @@ const requestListener = async (req, res) => {
   }
 
   if (url.pathname === "/api/sync") {
-    send(res, 200, JSON.stringify({ ok: true, source: url.searchParams.get("source") || "manual", synced_at: new Date().toISOString(), indexed_records: 1245, health: "Excelente" }));
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+      send(res, 200, JSON.stringify({ ok: false, error: "service_role_not_configured", hint: "Set SUPABASE_SERVICE_ROLE_KEY on the server to enable Datatracker sync." }));
+      return;
+    }
+    const type = (url.searchParams.get("type") || "rg").toLowerCase(); // rg | wg | all
+    try {
+      const types = type === "all" ? ["rg", "wg"] : [type];
+      const payload = [];
+      for (const t of types) {
+        const ecosystem = t === "rg" ? "IRTF" : "IETF";
+        const upstream = await fetch(`https://datatracker.ietf.org/api/v1/group/group/?state__slug=active&type__slug=${t}&limit=1000&format=json`);
+        if (!upstream.ok) throw new Error(`datatracker_${upstream.status}`);
+        const data = await upstream.json();
+        for (const o of (data.objects || [])) {
+          if (!o.acronym || !o.name) continue;
+          payload.push({
+            acronym: o.acronym,
+            name: o.name,
+            ecosystem,
+            description: (o.description && o.description.trim()) ? o.description.trim() : o.name,
+            charter_url: `https://datatracker.ietf.org/group/${o.acronym}/about/`
+          });
+        }
+      }
+      const affected = await supabaseRpc("sync_groups", { payload }, SUPABASE_SERVICE_KEY);
+      send(res, 200, JSON.stringify({ ok: true, source: "datatracker", types, fetched: payload.length, upserted: affected, synced_at: new Date().toISOString() }));
+    } catch (err) {
+      send(res, 200, JSON.stringify({ ok: false, error: String((err && err.message) || err) }));
+    }
     return;
   }
 
