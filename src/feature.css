@@ -632,6 +632,166 @@
   border-radius: 4px;
 }
 
+.graph-shell {
+  display: grid;
+  gap: 12px;
+}
+.graph-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: #dbe7ff;
+  background: #0b1020;
+  border: 1px solid #1f2a44;
+  border-radius: 8px;
+}
+.graph-toolbar span {
+  margin-right: auto;
+  font-weight: 900;
+}
+.graph-toolbar b {
+  padding: 5px 9px;
+  color: #b9c7e6;
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.adjacency-map-wrap.obsidian-graph {
+  overflow: hidden;
+  background: #0b1020;
+  border: 1px solid #1f2a44;
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), inset 0 -80px 120px rgba(59,130,246,.08);
+}
+.obsidian-graph .graph.large {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+  max-height: 680px;
+  cursor: default;
+}
+.obsidian-graph .map-bg {
+  fill: #0b1020;
+  stroke: #26334f;
+}
+.obsidian-graph .map-grid {
+  fill: url(#graph-grid);
+  opacity: .48;
+}
+.obsidian-graph .graph-edge {
+  opacity: .64;
+  transition: opacity .18s ease;
+}
+.obsidian-graph .graph-edge line {
+  stroke: #7887a8;
+  stroke-linecap: round;
+  stroke-width: .38;
+  pointer-events: stroke;
+  transition: stroke-width .18s ease, stroke .18s ease, opacity .18s ease;
+}
+.obsidian-graph .graph-edge.strong line { stroke: #a78bfa; stroke-width: 1.05; }
+.obsidian-graph .graph-edge.semantic line { stroke: #60a5fa; stroke-width: .72; }
+.obsidian-graph .graph-edge.explicit line { stroke: #34d399; stroke-width: .68; }
+.obsidian-graph .graph-edge.citation line { stroke: #fb923c; stroke-width: .58; stroke-dasharray: 1.7 1.4; }
+.obsidian-graph .graph-edge.rare line { stroke: #2dd4bf; stroke-width: .52; stroke-dasharray: .8 1.2; }
+.obsidian-graph .graph-edge.active {
+  opacity: 1;
+}
+.obsidian-graph .graph-edge.active line {
+  stroke: #f8fafc;
+  stroke-width: 1.35;
+  filter: drop-shadow(0 0 5px rgba(129,140,248,.85));
+}
+.obsidian-graph .graph-edge text {
+  fill: #dbe7ff;
+  stroke: #0b1020;
+  stroke-width: .4;
+  paint-order: stroke;
+  font-size: 2px;
+  font-weight: 800;
+  opacity: 0;
+  pointer-events: none;
+}
+.obsidian-graph .graph-edge.active text {
+  opacity: .92;
+}
+.obsidian-graph .graph-node {
+  cursor: grab;
+  transition: opacity .18s ease;
+}
+.obsidian-graph .graph-node.dragging {
+  cursor: grabbing;
+}
+.obsidian-graph .graph-node .node-halo {
+  fill: var(--node);
+  opacity: .13;
+  stroke: none;
+}
+.obsidian-graph .graph-node circle:not(.node-halo) {
+  fill: #111a31;
+  stroke: var(--node);
+  stroke-width: 1.05;
+}
+.obsidian-graph .graph-node.active circle:not(.node-halo),
+.obsidian-graph .graph-node.dragging circle:not(.node-halo) {
+  fill: #18233e;
+  stroke-width: 1.8;
+  filter: url(#node-glow);
+}
+.obsidian-graph .graph-node.active .node-halo,
+.obsidian-graph .graph-node.dragging .node-halo {
+  opacity: .34;
+}
+.obsidian-graph .node-initials {
+  fill: #eff6ff;
+  font-size: 2.25px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.obsidian-graph .node-label-bg {
+  fill: rgba(7,12,24,.86);
+  stroke: rgba(203,213,225,.18);
+  stroke-width: .2;
+}
+.obsidian-graph .node-label {
+  fill: #e2e8f0;
+  font-size: 2px;
+  font-weight: 800;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.obsidian-graph .graph-node:not(.active) .node-label-bg,
+.obsidian-graph .graph-node:not(.active) .node-label {
+  opacity: .78;
+}
+.obsidian-graph .graph-node:hover .node-label-bg,
+.obsidian-graph .graph-node:hover .node-label {
+  opacity: 1;
+}
+.map-summary h4 {
+  margin: 18px 0 8px;
+}
+.summary-link {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  padding: 0 12px;
+  color: #10254d;
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-weight: 850;
+}
+.summary-link span {
+  color: var(--blue);
+}
+
 @media (max-width: 1200px) {
   .search-layout,
   .tower-shell { grid-template-columns: 1fr; }
