@@ -509,6 +509,58 @@
   border-radius: 8px;
   font-weight: 800;
 }
+.profile-layout {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr);
+}
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  color: #fff;
+  background: linear-gradient(135deg, #08306b, #2563eb);
+  border-radius: 50%;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+.profile-hero h3 {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+.profile-hero p {
+  margin: 0;
+  color: #52617f;
+}
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+.profile-grid article {
+  min-height: 92px;
+  padding: 14px;
+  background: #f8fbff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.profile-grid small {
+  display: block;
+  min-height: 34px;
+  color: #52617f;
+  font-weight: 800;
+}
+.profile-grid b {
+  display: block;
+  margin-top: 8px;
+  color: #07152f;
+  font-size: 24px;
+}
 
 .tower-shell {
   display: grid;
@@ -815,6 +867,8 @@
   .watch-mode-panel { grid-template-columns: 1fr; }
   .experience-card { min-height: auto; }
   .custom-topic-row { grid-template-columns: 1fr; }
+  .profile-layout,
+  .profile-grid { grid-template-columns: 1fr; }
   .search-result,
   .tower-item { grid-template-columns: 1fr; }
 }
