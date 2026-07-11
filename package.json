@@ -5,7 +5,8 @@
   "description": "Bussola IETF demo app for IRTF/IETF discovery, monitoring and evidence-backed opportunities.",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "ingest:knowledge": "node scripts/ingest-ietf-knowledge.mjs"
   },
   "engines": {
     "node": ">=20"
