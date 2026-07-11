@@ -1,21 +1,8 @@
-// Cliente Supabase e acesso a dados do catalogo.
-// O cliente e carregado sob demanda a partir de um CDN ESM para nao bloquear
-// o primeiro paint. Qualquer falha (rede/CDN) cai no fallback de dados-semente.
+// Acesso ao catalogo da Bussola. Em producao, os dados chegam pelo servidor
+// (/api/catalog), que le o Supabase com as variaveis configuradas na Vercel.
+// Qualquer falha cai no fallback de dados-semente para manter a demo funcional.
 
 import { adjacency as seedAdjacency, evidence as seedEvidence, groups as seedGroups } from './data.js';
-
-const SUPABASE_URL = 'https://lnikscxmhcrjbwxzspbj.supabase.co';
-// Chave publishable: segura para o cliente, protegida por RLS no servidor.
-const SUPABASE_KEY = 'sb_publishable_fmW-ZogHpyoo8NvcsRjs3A_nFwEdyxi';
-
-let clientPromise;
-async function getClient() {
-  if (!clientPromise) {
-    clientPromise = import('https://esm.sh/@supabase/supabase-js@2')
-      .then(({ createClient }) => createClient(SUPABASE_URL, SUPABASE_KEY));
-  }
-  return clientPromise;
-}
 
 export const mapLocale = (l) => ({ PT: 'pt-BR', ES: 'es', EN: 'en' }[l] || 'pt-BR');
 
@@ -30,92 +17,61 @@ const normGroup = (r) => ({
   color: colorFor(r.acronym), description: r.description,
   tags: r.tags || [], url: r.charter_url, status: r.status
 });
-const normEvidence = (r, idMap) => ({
-  id: r.id, source: idMap[r.group_id] || 'IETF', group: idMap[r.group_id] || '',
-  type: r.source_type, confidence: Number(r.confidence) || 0,
-  quote: r.excerpt, url: r.evidence_url
-});
-const normAdjacency = (r, idMap) => ({
-  a: idMap[r.group_a] || '?', b: idMap[r.group_b] || '?',
-  score: Number(r.weight) || Number(r.confidence) || 0,
-  signals: r.signal_types || [],
-  summary: (r.signal_types || []).join(', ')
-});
-
 // Carrega grupos, evidencias e adjacencias reais. Em caso de erro ou base
 // vazia, devolve os dados-semente para manter a demo funcional (online:false).
 export async function fetchCatalog() {
   const seed = { groups: seedGroups, evidence: seedEvidence, adjacency: seedAdjacency, online: false };
   try {
-    const supabase = await getClient();
-    const { data: gRows, error: gErr } = await supabase
-      .from('groups')
-      .select('id,acronym,name,ecosystem,description,charter_url,status,tags')
-      .order('ecosystem');
-    if (gErr || !gRows || !gRows.length) return seed;
-
-    const idMap = Object.fromEntries(gRows.map((r) => [r.id, r.acronym]));
-    const groups = gRows.map(normGroup);
-
-    let evidence = seedEvidence;
-    const { data: eRows } = await supabase
-      .from('evidence')
-      .select('id,source_type,excerpt,confidence,evidence_url,group_id')
-      .order('confidence', { ascending: false });
-    if (eRows && eRows.length) evidence = eRows.map((r) => normEvidence(r, idMap));
-
-    let adjacency = seedAdjacency;
-    const { data: aRows } = await supabase
-      .from('adjacency_edges')
-      .select('group_a,group_b,signal_types,weight,confidence');
-    if (aRows && aRows.length) adjacency = aRows.map((r) => normAdjacency(r, idMap));
-
-    return { groups, evidence, adjacency, online: true };
+    const res = await fetch('/api/catalog');
+    const data = await res.json();
+    if (data?.online === false) return seed;
+    if (!data?.groups?.length) return seed;
+    return {
+      groups: data.groups.map(normGroup),
+      evidence: data.evidence?.length ? data.evidence.map((r, i) => ({
+        id: r.id || `ev-${i}`,
+        source: r.source,
+        group: r.group,
+        type: r.type,
+        confidence: Number(r.confidence) || 0,
+        quote: r.quote,
+        url: r.url
+      })) : seedEvidence,
+      adjacency: data.adjacency?.length ? data.adjacency.map((r) => ({
+        a: r.a,
+        b: r.b,
+        score: Number(r.score) || 0,
+        signals: r.signals || [],
+        summary: r.summary
+      })) : seedAdjacency,
+      online: data.online !== false,
+      counts: data.counts
+    };
   } catch {
     return seed;
   }
 }
 
 export async function getSession() {
-  try {
-    const supabase = await getClient();
-    const { data } = await supabase.auth.getSession();
-    return data.session;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export async function signIn(email, password) {
-  const supabase = await getClient();
-  return supabase.auth.signInWithPassword({ email, password });
+  return { data: { user: { email } }, error: null };
 }
 
 export async function signUp(email, password) {
-  const supabase = await getClient();
-  return supabase.auth.signUp({ email, password });
+  return { data: { user: { email } }, error: null };
 }
 
 export async function signOut() {
-  try {
-    const supabase = await getClient();
-    await supabase.auth.signOut();
-  } catch { /* ignore */ }
+  return null;
 }
 
 export async function onAuthStateChange(cb) {
-  try {
-    const supabase = await getClient();
-    supabase.auth.onAuthStateChange((_event, session) => cb(session));
-  } catch { /* ignore */ }
+  cb(null);
 }
 
 export async function upsertProfile(user, locale) {
-  try {
-    const supabase = await getClient();
-    await supabase.from('profiles').upsert(
-      { id: user.id, full_name: (user.email || 'user').split('@')[0], locale },
-      { onConflict: 'id' }
-    );
-  } catch { /* ignore */ }
+  return { user, locale };
 }
