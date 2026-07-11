@@ -37,6 +37,36 @@ const recentDocs = Number(args["recent-docs"] || 200);
 const mailLimit = Number(args["mail-limit"] || 40);
 
 const sourceStats = new Map();
+const SOURCE_DEFS = {
+  "datatracker-documents": {
+    slug: "datatracker-documents",
+    name: "IETF Datatracker Documents API",
+    source_type: "datatracker",
+    url: "https://datatracker.ietf.org/api/v1/doc/document/",
+    freshness_minutes: 30
+  },
+  "datatracker-meetings": {
+    slug: "datatracker-meetings",
+    name: "IETF Datatracker Meetings API",
+    source_type: "meeting",
+    url: "https://datatracker.ietf.org/api/v1/meeting/",
+    freshness_minutes: 60
+  },
+  "rfc-index-xml": {
+    slug: "rfc-index-xml",
+    name: "RFC Editor RFC Index XML",
+    source_type: "rfc",
+    url: "https://www.rfc-editor.org/rfc/rfc-index.xml",
+    freshness_minutes: 1440
+  },
+  "mailarchive-json": {
+    slug: "mailarchive-json",
+    name: "IETF Mail Archive",
+    source_type: "email",
+    url: "https://mailarchive.ietf.org",
+    freshness_minutes: 30
+  }
+};
 
 main().catch((err) => {
   console.error(err);
@@ -216,7 +246,16 @@ async function ingestMailArchive(groupAcronyms, limit) {
 }
 
 async function touchSources() {
-  const rows = [...sourceStats.keys()].map((slug) => ({ slug, last_synced_at: new Date().toISOString() }));
+  const rows = [...sourceStats.keys()].map((slug) => ({
+    ...(SOURCE_DEFS[slug] || {
+      slug,
+      name: slug,
+      source_type: "external",
+      url: "https://datatracker.ietf.org",
+      freshness_minutes: 60
+    }),
+    last_synced_at: new Date().toISOString()
+  }));
   await upsert("ietf_sources", rows, "slug");
 }
 
