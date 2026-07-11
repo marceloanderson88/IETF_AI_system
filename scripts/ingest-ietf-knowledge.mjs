@@ -93,16 +93,16 @@ async function main() {
 async function ingestDatatrackerDocuments(groupAcronyms, limit) {
   const rows = [];
   for (const group of groupAcronyms) {
-    const url = new URL("https://datatracker.ietf.org/api/v1/doc/document/");
-    url.searchParams.set("format", "json");
-    url.searchParams.set("limit", String(Math.max(20, limit)));
-    url.searchParams.set("group__acronym", group);
-    url.searchParams.set("order_by", "-time");
-    const data = await getJsonBestEffort(url);
-    for (const item of data.objects || []) rows.push(normalizeDocument(item, group));
+    let groupRows = await fetchGroupDocumentsFromApi(group, limit);
+    if (!groupRows.length) {
+      groupRows = await fetchGroupDocumentsFromPage(group, limit);
+    }
+    console.log(`  datatracker documents ${group}: ${groupRows.length}`);
+    rows.push(...groupRows);
   }
-  await upsert("datatracker_documents", rows.filter(Boolean), "name");
-  record("datatracker-documents", rows.length, rows.length);
+  const uniqueRows = uniqueBy(rows.filter(Boolean), (row) => row.name);
+  await upsert("datatracker_documents", uniqueRows, "name");
+  record("datatracker-documents", uniqueRows.length, uniqueRows.length);
 }
 
 async function ingestRfcIndex() {
@@ -147,9 +147,17 @@ async function ingestMeetings(meetingNumbers) {
   const meetingsData = await getJsonBestEffort(
     "https://datatracker.ietf.org/api/v1/meeting/meeting/?format=json&limit=20&order_by=-date"
   );
-  const selected = (meetingsData.objects || [])
+  let selected = (meetingsData.objects || [])
     .filter((m) => !meetingNumbers || meetingNumbers.includes(String(m.number || m.meeting_num || m.number_str)))
     .slice(0, meetingNumbers ? 100 : 4);
+
+  if (meetingNumbers && !selected.length) {
+    selected = meetingNumbers.map((number) => ({
+      number,
+      name: `IETF ${number}`,
+      resource_uri: `/api/v1/meeting/meeting/${number}/`
+    }));
+  }
 
   for (const meeting of selected) {
     const number = Number(meeting.number || meeting.meeting_num || meeting.number_str);
@@ -191,6 +199,7 @@ async function ingestMeetings(meetingNumbers) {
     const materials = await getJsonBestEffort(
       `https://datatracker.ietf.org/api/v1/meeting/material/?format=json&limit=1000&session__meeting__number=${number}`
     );
+    const materialCountBeforeFallback = materialRows.length;
     for (const material of materials.objects || []) {
       const sessionId = material.session ? stableId(material.session) : null;
       const groupAcronym = getAcronym(material.group || material.group_acronym);
@@ -207,12 +216,19 @@ async function ingestMeetings(meetingNumbers) {
         metadata: material
       }));
     }
+    if (materialRows.length === materialCountBeforeFallback && number) {
+      const fallbackMaterials = await fetchMeetingMaterialsFromPage(number, meetingId);
+      materialRows.push(...fallbackMaterials);
+    }
   }
 
-  await upsert("meeting_events", meetingRows, "meeting_id");
-  await upsert("meeting_sessions", sessionRows, "session_id");
-  await upsert("meeting_materials", materialRows, "material_id");
-  record("datatracker-meetings", meetingRows.length + sessionRows.length + materialRows.length, meetingRows.length + sessionRows.length + materialRows.length);
+  const uniqueMeetings = uniqueBy(meetingRows, (row) => row.meeting_id);
+  const uniqueSessions = uniqueBy(sessionRows, (row) => row.session_id);
+  const uniqueMaterials = uniqueBy(materialRows, (row) => row.material_id);
+  await upsert("meeting_events", uniqueMeetings, "meeting_id");
+  await upsert("meeting_sessions", uniqueSessions, "session_id");
+  await upsert("meeting_materials", uniqueMaterials, "material_id");
+  record("datatracker-meetings", uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length, uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length);
 }
 
 async function ingestMailArchive(groupAcronyms, limit) {
@@ -306,6 +322,81 @@ async function getTextBestEffort(url) {
   }
 }
 
+async function fetchGroupDocumentsFromApi(group, limit) {
+  const urls = [
+    datatrackerApiUrl("https://datatracker.ietf.org/api/v1/doc/document/", {
+      limit: Math.max(20, limit),
+      group__acronym: group,
+      order_by: "-time"
+    }),
+    datatrackerApiUrl("https://datatracker.ietf.org/api/v1/doc/document/", {
+      limit: Math.max(20, limit),
+      name__contains: group,
+      order_by: "-time"
+    })
+  ];
+  const rows = [];
+  for (const url of urls) {
+    const data = await getJsonBestEffort(url);
+    for (const item of data.objects || []) {
+      if (documentMatchesGroup(item, group)) rows.push(normalizeDocument(item, group));
+    }
+    if (rows.length) break;
+  }
+  return uniqueBy(rows.filter(Boolean), (row) => row.name).slice(0, limit);
+}
+
+async function fetchGroupDocumentsFromPage(group, limit) {
+  const html = await getTextBestEffort(`https://datatracker.ietf.org/group/${group}/documents/`);
+  if (!html) return [];
+  const docs = [];
+  for (const match of html.matchAll(/<a[^>]+href="\/doc\/([^"\/]+)\/"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const name = decodeHtml(match[1]);
+    if (!name || !documentNameMatchesGroup(name, group)) continue;
+    docs.push(clean({
+      name,
+      title: stripHtml(match[2]) || name,
+      document_type: name.toLowerCase().startsWith("rfc") ? "rfc" : "internet-draft",
+      group_acronym: group.toUpperCase(),
+      state: null,
+      url: `https://datatracker.ietf.org/doc/${name}/`,
+      datatracker_resource: null,
+      metadata: {
+        source: "datatracker-group-documents-page",
+        group
+      }
+    }));
+  }
+  return uniqueBy(docs, (row) => row.name).slice(0, limit);
+}
+
+async function fetchMeetingMaterialsFromPage(number, meetingId) {
+  const html = await getTextBestEffort(`https://datatracker.ietf.org/meeting/${number}/materials/`);
+  if (!html) return [];
+  const rows = [];
+  for (const match of html.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = decodeHtml(match[1]);
+    const title = stripHtml(match[2]);
+    if (!href || !title || !isMeetingMaterialHref(number, href)) continue;
+    const url = absoluteDatatracker(href);
+    rows.push(clean({
+      material_id: stableId(url),
+      session_id: null,
+      meeting_id: meetingId,
+      group_acronym: guessGroupFromMaterial(href, title),
+      title,
+      material_type: guessMaterialType(href, title),
+      url,
+      uploaded_at: null,
+      metadata: {
+        source: "datatracker-meeting-materials-page",
+        meeting_number: number
+      }
+    }));
+  }
+  return uniqueBy(rows, (row) => row.material_id);
+}
+
 function normalizeDocument(item, group) {
   if (!item?.name) return null;
   return clean({
@@ -326,6 +417,46 @@ function normalizeDocument(item, group) {
     updated_at: item.time || item.expires,
     metadata: item
   });
+}
+
+function datatrackerApiUrl(base, params) {
+  const url = new URL(base);
+  url.searchParams.set("format", "json");
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
+  }
+  return url;
+}
+
+function documentMatchesGroup(item, group) {
+  const acronym = getAcronym(item?.group || item?.group_acronym || item?.group__acronym);
+  return acronym?.toLowerCase() === group.toLowerCase() || documentNameMatchesGroup(item?.name, group);
+}
+
+function documentNameMatchesGroup(name, group) {
+  const text = String(name || "").toLowerCase();
+  const slug = String(group || "").toLowerCase();
+  return text.includes(`-${slug}-`) || text.startsWith(`draft-${slug}-`) || text.startsWith(`draft-irtf-${slug}-`) || text.startsWith(`draft-ietf-${slug}-`);
+}
+
+function isMeetingMaterialHref(number, href) {
+  const text = String(href || "");
+  return text.includes(`/meeting/${number}/materials/`) || text.startsWith(`/doc/`);
+}
+
+function guessGroupFromMaterial(href, title) {
+  const text = `${href} ${title}`.toLowerCase();
+  const match = text.match(/(?:agenda|minutes|slides)-([a-z0-9-]+)/) || text.match(/\b([a-z0-9]+rg)\b/);
+  return match ? match[1].split("-")[0].toUpperCase() : null;
+}
+
+function guessMaterialType(href, title) {
+  const text = `${href} ${title}`.toLowerCase();
+  if (text.includes("agenda")) return "agenda";
+  if (text.includes("minutes")) return "minutes";
+  if (text.includes("slide")) return "slides";
+  if (text.includes("recording")) return "recording";
+  return "material";
 }
 
 function clean(row) {
@@ -357,6 +488,18 @@ function record(name, seen, upserted) {
 function chunk(items, size) {
   const out = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+function uniqueBy(items, keyFn) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
   return out;
 }
 
@@ -394,6 +537,12 @@ function decodeXml(value) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
+}
+
+function decodeHtml(value) {
+  return decodeXml(String(value || "")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'"));
 }
 
 function monthNumber(month) {
