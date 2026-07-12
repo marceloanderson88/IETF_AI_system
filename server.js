@@ -80,10 +80,11 @@ function searchRank(row, q, fields) {
 }
 
 async function buildKnowledgeSearch(q) {
-  const [docs, rfcs, materials, mails] = await Promise.all([
+  const [docs, rfcs, materials, agendas, mails] = await Promise.all([
     supabaseSelect("datatracker_documents", { select: "name,title,document_type,group_acronym,state,abstract,url,updated_at", limit: 250, order: "updated_at.desc.nullslast" }),
     supabaseSelect("rfc_index", { select: "rfc_number,title,doc_id,status,pub_date,url", limit: 250, order: "rfc_number.desc" }),
     supabaseSelect("meeting_materials", { select: "material_id,title,material_type,group_acronym,url,uploaded_at", limit: 250 }),
+    supabaseSelect("meeting_agenda_items", { select: "agenda_item_id,item_title,group_acronym,agenda_url,source_text,presenter,duration_minutes", limit: 250 }),
     supabaseSelect("mail_messages", { select: "message_id,list_name,subject,snippet,url,sent_at", limit: 100 })
   ]);
 
@@ -99,10 +100,13 @@ async function buildKnowledgeSearch(q) {
   const meetingRows = materials.filter((m) => includesQuery(m, q, ["title", "group_acronym", "material_type"])).map((m) => ({
     type: "Reuniao", title: m.title, text: m.material_type || "Material de reuniao", tags: [m.group_acronym, m.material_type].filter(Boolean), route: "acompanhamentos", url: m.url, rank: searchRank(m, q, ["title", "group_acronym", "material_type"])
   }));
+  const agendaRows = agendas.filter((a) => includesQuery(a, q, ["item_title", "source_text", "group_acronym", "presenter"])).map((a) => ({
+    type: "Reuniao", title: a.item_title, text: a.source_text || "Item de agenda", tags: [a.group_acronym, a.presenter ? `Por ${a.presenter}` : null, a.duration_minutes ? `${a.duration_minutes} min` : null].filter(Boolean), route: "acompanhamentos", url: a.agenda_url, rank: searchRank(a, q, ["item_title", "source_text", "group_acronym", "presenter"])
+  }));
   const mailRows = mails.filter((m) => includesQuery(m, q, ["subject", "snippet", "list_name"])).map((m) => ({
     type: "Evidencia", title: m.subject || `Mensagem ${m.list_name}`, text: m.snippet || "Mensagem da lista de e-mail", tags: [String(m.list_name || "").toUpperCase(), "Lista"], route: "evidencias", url: m.url, rank: searchRank(m, q, ["subject", "snippet", "list_name"])
   }));
-  return [...groups.filter((g) => includesQuery({ title: g.title, text: g.text, tags: g.tags.join(" ") }, q, ["title", "text", "tags"])), ...docRows, ...rfcRows, ...meetingRows, ...mailRows]
+  return [...groups.filter((g) => includesQuery({ title: g.title, text: g.text, tags: g.tags.join(" ") }, q, ["title", "text", "tags"])), ...docRows, ...rfcRows, ...meetingRows, ...agendaRows, ...mailRows]
     .sort((a, b) => b.rank - a.rank)
     .slice(0, 40);
 }
@@ -144,9 +148,10 @@ const requestListener = async (req, res) => {
 
   if (url.pathname === "/api/catalog") {
     try {
-      const [docs, materials, mails] = await Promise.all([
+      const [docs, materials, agendas, mails] = await Promise.all([
         supabaseSelect("datatracker_documents", { select: "name,title,document_type,group_acronym,state,abstract,url,updated_at", limit: 500 }),
         supabaseSelect("meeting_materials", { select: "material_id,title,material_type,group_acronym,url", limit: 250 }),
+        supabaseSelect("meeting_agenda_items", { select: "agenda_item_id,item_title,group_acronym,agenda_url,source_text", limit: 250 }),
         supabaseSelect("mail_messages", { select: "message_id,list_name,subject,snippet,url", limit: 80 })
       ]);
       const byGroup = new Map();
@@ -157,6 +162,11 @@ const requestListener = async (req, res) => {
       }
       for (const m of materials) {
         const g = String(m.group_acronym || "").toUpperCase();
+        if (!g) continue;
+        byGroup.set(g, { docs: byGroup.get(g)?.docs || 0, materials: (byGroup.get(g)?.materials || 0) + 1, mails: byGroup.get(g)?.mails || 0 });
+      }
+      for (const a of agendas) {
+        const g = String(a.group_acronym || "").toUpperCase();
         if (!g) continue;
         byGroup.set(g, { docs: byGroup.get(g)?.docs || 0, materials: (byGroup.get(g)?.materials || 0) + 1, mails: byGroup.get(g)?.mails || 0 });
       }
@@ -199,6 +209,14 @@ const requestListener = async (req, res) => {
           quote: `${m.material_type || "Material"} de reuniao conectado ao grupo.`,
           url: m.url
         })),
+        ...agendas.slice(0, 20).map((a) => ({
+          source: a.item_title,
+          group: String(a.group_acronym || "IETF").toUpperCase(),
+          type: "Agenda",
+          confidence: 0.66,
+          quote: a.source_text || "Item de agenda de reuniao.",
+          url: a.agenda_url
+        })),
         ...mails.slice(0, 12).map((m) => ({
           source: m.subject || `Lista ${m.list_name}`,
           group: String(m.list_name || "IETF").toUpperCase(),
@@ -221,7 +239,7 @@ const requestListener = async (req, res) => {
           summary: `${a.acronym} e ${b.acronym} aparecem no corpus inicial carregado do Datatracker.`
         });
       }
-      send(res, 200, JSON.stringify({ groups, evidence, adjacency, online: true, counts: { docs: docs.length, materials: materials.length, mails: mails.length } }));
+      send(res, 200, JSON.stringify({ groups, evidence, adjacency, online: true, counts: { docs: docs.length, materials: materials.length, agendas: agendas.length, mails: mails.length } }));
     } catch (err) {
       send(res, 200, JSON.stringify({ ...mock, online: false, error: String((err && err.message) || err) }));
     }

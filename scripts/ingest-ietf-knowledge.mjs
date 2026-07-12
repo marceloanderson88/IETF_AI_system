@@ -12,7 +12,7 @@
  *
  * Optional args:
  *   --groups t2trg,gaia,cfrg,dinrg,nmrg
- *   --meetings 120,121
+ *   --meetings 120,121 or --meetings 120-now
  *   --recent-docs 200
  *   --mail-limit 40
  */
@@ -143,16 +143,18 @@ async function ingestMeetings(meetingNumbers) {
   const meetingRows = [];
   const sessionRows = [];
   const materialRows = [];
+  const agendaRows = [];
 
   const meetingsData = await getJsonBestEffort(
     "https://datatracker.ietf.org/api/v1/meeting/meeting/?format=json&limit=20&order_by=-date"
   );
+  const resolvedMeetingNumbers = resolveMeetingNumbers(meetingNumbers, meetingsData.objects || []);
   let selected = (meetingsData.objects || [])
-    .filter((m) => !meetingNumbers || meetingNumbers.includes(String(m.number || m.meeting_num || m.number_str)))
-    .slice(0, meetingNumbers ? 100 : 4);
+    .filter((m) => !resolvedMeetingNumbers || resolvedMeetingNumbers.includes(String(m.number || m.meeting_num || m.number_str)))
+    .slice(0, resolvedMeetingNumbers ? 100 : 4);
 
-  if (meetingNumbers && !selected.length) {
-    selected = meetingNumbers.map((number) => ({
+  if (resolvedMeetingNumbers && !selected.length) {
+    selected = resolvedMeetingNumbers.map((number) => ({
       number,
       name: `IETF ${number}`,
       resource_uri: `/api/v1/meeting/meeting/${number}/`
@@ -220,15 +222,22 @@ async function ingestMeetings(meetingNumbers) {
       const fallbackMaterials = await fetchMeetingMaterialsFromPage(number, meetingId);
       materialRows.push(...fallbackMaterials);
     }
+    const meetingMaterials = materialRows.filter((m) => m.meeting_id === meetingId);
+    for (const agenda of meetingMaterials.filter(isAgendaMaterial)) {
+      const items = await fetchAgendaItems(agenda, meetingId);
+      agendaRows.push(...items);
+    }
   }
 
   const uniqueMeetings = uniqueBy(meetingRows, (row) => row.meeting_id);
   const uniqueSessions = uniqueBy(sessionRows, (row) => row.session_id);
   const uniqueMaterials = uniqueBy(materialRows, (row) => row.material_id);
+  const uniqueAgendaRows = uniqueBy(agendaRows, (row) => row.agenda_item_id);
   await upsert("meeting_events", uniqueMeetings, "meeting_id");
   await upsert("meeting_sessions", uniqueSessions, "session_id");
   await upsert("meeting_materials", uniqueMaterials, "material_id");
-  record("datatracker-meetings", uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length, uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length);
+  await upsert("meeting_agenda_items", uniqueAgendaRows, "agenda_item_id");
+  record("datatracker-meetings", uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length + uniqueAgendaRows.length, uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length + uniqueAgendaRows.length);
 }
 
 async function ingestMailArchive(groupAcronyms, limit) {
@@ -397,6 +406,39 @@ async function fetchMeetingMaterialsFromPage(number, meetingId) {
   return uniqueBy(rows, (row) => row.material_id);
 }
 
+async function fetchAgendaItems(agenda, meetingId) {
+  const page = await getTextBestEffort(agenda.url);
+  if (!page) return [];
+  const lines = textLines(page)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length >= 6 && line.length <= 220)
+    .filter((line) => !/^(agenda|minutes|session|ietf\s+\d+|meeting materials)$/i.test(line))
+    .filter((line) => !/^[-=_\s]+$/.test(line));
+  const rows = [];
+  for (const [index, line] of lines.entries()) {
+    const parsed = parseAgendaLine(line);
+    if (!parsed.title || parsed.title.length < 4) continue;
+    rows.push(clean({
+      agenda_item_id: stableId(`${agenda.material_id}:${index}:${parsed.title}`),
+      meeting_id: meetingId,
+      session_id: agenda.session_id,
+      group_acronym: agenda.group_acronym || guessGroupFromMaterial(agenda.url, agenda.title),
+      item_order: index + 1,
+      item_title: parsed.title,
+      presenter: parsed.presenter,
+      duration_minutes: parsed.duration,
+      agenda_url: agenda.url,
+      source_text: line,
+      metadata: {
+        source_material_id: agenda.material_id,
+        source_title: agenda.title,
+        parser: "line-heuristic"
+      }
+    }));
+  }
+  return uniqueBy(rows, (row) => row.agenda_item_id).slice(0, 80);
+}
+
 function normalizeDocument(item, group) {
   if (!item?.name) return null;
   return clean({
@@ -428,6 +470,34 @@ function datatrackerApiUrl(base, params) {
   return url;
 }
 
+function resolveMeetingNumbers(values, meetingsFromApi) {
+  if (!values) return null;
+  const latest = meetingsFromApi
+    .map((m) => Number(m.number || m.meeting_num || m.number_str))
+    .filter(Boolean)
+    .sort((a, b) => b - a)[0];
+  const out = [];
+  for (const raw of values) {
+    const value = String(raw).trim().toLowerCase();
+    const range = value.match(/^(\d+)\s*-\s*(now|latest|atual|hoje)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = latest || start;
+      for (let n = start; n <= end; n++) out.push(String(n));
+      continue;
+    }
+    const numericRange = value.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (numericRange) {
+      const start = Number(numericRange[1]);
+      const end = Number(numericRange[2]);
+      for (let n = Math.min(start, end); n <= Math.max(start, end); n++) out.push(String(n));
+      continue;
+    }
+    if (/^\d+$/.test(value)) out.push(value);
+  }
+  return uniqueBy(out, (x) => x);
+}
+
 function documentMatchesGroup(item, group) {
   const acronym = getAcronym(item?.group || item?.group_acronym || item?.group__acronym);
   return acronym?.toLowerCase() === group.toLowerCase() || documentNameMatchesGroup(item?.name, group);
@@ -444,6 +514,11 @@ function isMeetingMaterialHref(number, href) {
   return text.includes(`/meeting/${number}/materials/`) || text.startsWith(`/doc/`);
 }
 
+function isAgendaMaterial(material) {
+  const text = `${material.title || ""} ${material.url || ""} ${material.material_type || ""}`.toLowerCase();
+  return text.includes("agenda");
+}
+
 function guessGroupFromMaterial(href, title) {
   const text = `${href} ${title}`.toLowerCase();
   const match = text.match(/(?:agenda|minutes|slides)-([a-z0-9-]+)/) || text.match(/\b([a-z0-9]+rg)\b/);
@@ -457,6 +532,23 @@ function guessMaterialType(href, title) {
   if (text.includes("slide")) return "slides";
   if (text.includes("recording")) return "recording";
   return "material";
+}
+
+function parseAgendaLine(line) {
+  const durationMatch = line.match(/(?:^|\s)(\d{1,3})\s*(?:min|mins|minutes)\b/i);
+  const duration = durationMatch ? Number(durationMatch[1]) : null;
+  let title = line
+    .replace(/^\d{1,2}:\d{2}\s*(?:-|–|—)?\s*/i, "")
+    .replace(/^\d+[.)]\s*/, "")
+    .replace(/\s*\(\s*\d{1,3}\s*(?:min|mins|minutes)\s*\)\s*/i, " ")
+    .trim();
+  let presenter = null;
+  const presenterMatch = title.match(/\s+(?:-|–|—)\s+([^,]{2,80})$/);
+  if (presenterMatch && !/\b(draft|rfc|ietf|irtf)\b/i.test(presenterMatch[1])) {
+    presenter = presenterMatch[1].trim();
+    title = title.slice(0, presenterMatch.index).trim();
+  }
+  return { title, presenter, duration };
 }
 
 function clean(row) {
@@ -562,6 +654,18 @@ function stripHtml(html) {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function textLines(html) {
+  return decodeHtml(String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
+    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
+    .replace(/<(br|p|li|tr|h[1-6])\b[^>]*>/gi, "\n")
+    .replace(/<\/(p|li|tr|h[1-6]|div|section)>/gi, "\n")
+    .replace(/<[^>]+>/g, " "))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function textBetween(text, start, end) {

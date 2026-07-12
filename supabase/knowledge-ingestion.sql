@@ -91,6 +91,21 @@ create table if not exists public.meeting_materials (
   collected_at timestamptz not null default now()
 );
 
+create table if not exists public.meeting_agenda_items (
+  agenda_item_id text primary key,
+  meeting_id text references public.meeting_events(meeting_id) on delete cascade,
+  session_id text references public.meeting_sessions(session_id) on delete set null,
+  group_acronym text,
+  item_order integer,
+  item_title text not null,
+  presenter text,
+  duration_minutes integer,
+  agenda_url text,
+  source_text text,
+  metadata jsonb not null default '{}',
+  collected_at timestamptz not null default now()
+);
+
 create table if not exists public.mail_messages (
   message_id text primary key,
   list_name text not null,
@@ -123,6 +138,8 @@ create index if not exists idx_rfc_index_doc_id on public.rfc_index(doc_id);
 create index if not exists idx_meeting_sessions_group on public.meeting_sessions(group_acronym);
 create index if not exists idx_meeting_sessions_starts on public.meeting_sessions(starts_at desc);
 create index if not exists idx_meeting_materials_group on public.meeting_materials(group_acronym);
+create index if not exists idx_meeting_agenda_items_group on public.meeting_agenda_items(group_acronym);
+create index if not exists idx_meeting_agenda_items_meeting on public.meeting_agenda_items(meeting_id, item_order);
 create index if not exists idx_mail_messages_list_sent on public.mail_messages(list_name, sent_at desc);
 create index if not exists idx_group_participants_group on public.group_participants(group_acronym);
 
@@ -132,6 +149,7 @@ alter table public.rfc_index enable row level security;
 alter table public.meeting_events enable row level security;
 alter table public.meeting_sessions enable row level security;
 alter table public.meeting_materials enable row level security;
+alter table public.meeting_agenda_items enable row level security;
 alter table public.mail_messages enable row level security;
 alter table public.group_participants enable row level security;
 
@@ -153,6 +171,10 @@ create policy "Public can read meeting sessions" on public.meeting_sessions
 
 drop policy if exists "Public can read meeting materials" on public.meeting_materials;
 create policy "Public can read meeting materials" on public.meeting_materials
+  for select to anon, authenticated using (true);
+
+drop policy if exists "Public can read meeting agenda items" on public.meeting_agenda_items;
+create policy "Public can read meeting agenda items" on public.meeting_agenda_items
   for select to anon, authenticated using (true);
 
 drop policy if exists "Public can read mail messages" on public.mail_messages;
