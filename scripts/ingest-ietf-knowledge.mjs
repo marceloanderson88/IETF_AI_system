@@ -19,7 +19,7 @@
 
 const DEFAULT_GROUPS = [
   "cfrg", "dinrg", "gaia", "hrpc", "iccrg", "icnrg", "maprg", "nmrg",
-  "panrg", "pearg", "qirg", "rasprg", "t2trg", "ufmrg"
+  "panrg", "pearg", "qirg", "rasprg", "space", "sustain", "t2trg", "ufmrg"
 ];
 
 const args = parseArgs(process.argv.slice(2));
@@ -153,12 +153,14 @@ async function ingestMeetings(meetingNumbers) {
     .filter((m) => !resolvedMeetingNumbers || resolvedMeetingNumbers.includes(String(m.number || m.meeting_num || m.number_str)))
     .slice(0, resolvedMeetingNumbers ? 100 : 4);
 
-  if (resolvedMeetingNumbers && !selected.length) {
-    selected = resolvedMeetingNumbers.map((number) => ({
+  if (resolvedMeetingNumbers) {
+    const selectedNumbers = new Set(selected.map((m) => String(m.number || m.meeting_num || m.number_str)));
+    const missing = resolvedMeetingNumbers.filter((number) => !selectedNumbers.has(String(number)));
+    selected = selected.concat(missing.map((number) => ({
       number,
       name: `IETF ${number}`,
       resource_uri: `/api/v1/meeting/meeting/${number}/`
-    }));
+    })));
   }
 
   for (const meeting of selected) {
@@ -475,7 +477,7 @@ function resolveMeetingNumbers(values, meetingsFromApi) {
   const latest = meetingsFromApi
     .map((m) => Number(m.number || m.meeting_num || m.number_str))
     .filter(Boolean)
-    .sort((a, b) => b - a)[0];
+    .sort((a, b) => b - a)[0] || 122;
   const out = [];
   for (const raw of values) {
     const value = String(raw).trim().toLowerCase();
