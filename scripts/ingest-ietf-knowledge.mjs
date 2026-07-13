@@ -11,10 +11,13 @@
  *   SUPABASE_SERVICE_ROLE_KEY=<secret service role key>
  *
  * Optional args:
- *   --groups t2trg,gaia,cfrg,dinrg,nmrg
+ *   --groups t2trg,gaia,cfrg,dinrg,nmrg or --groups all
+ *   --group-types rg,wg
  *   --meetings 120,121 or --meetings 120-now
  *   --recent-docs 200
- *   --mail-limit 40
+ *   --mail-limit 40 or --mail-limit all
+ *   --mail-pages 10
+ *   --mail-delay-ms 150
  */
 
 const DEFAULT_GROUPS = [
@@ -31,10 +34,13 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
   process.exit(1);
 }
 
-const groups = splitArg(args.groups) || DEFAULT_GROUPS;
+let groups = splitArg(args.groups) || DEFAULT_GROUPS;
+const groupTypes = splitArg(args["group-types"]) || ["rg"];
 const meetings = splitArg(args.meetings);
 const recentDocs = Number(args["recent-docs"] || 200);
-const mailLimit = Number(args["mail-limit"] || 40);
+const mailLimit = parseLimit(args["mail-limit"], 40);
+const mailPages = parseLimit(args["mail-pages"], Number.isFinite(mailLimit) ? 1 : Infinity);
+const mailDelayMs = Number(args["mail-delay-ms"] || 150);
 
 const sourceStats = new Map();
 const SOURCE_DEFS = {
@@ -75,13 +81,16 @@ main().catch((err) => {
 
 async function main() {
   console.log("Starting Bussola IETF ingestion");
+  if (groups.some((group) => String(group).toLowerCase() === "all")) {
+    groups = await discoverGroups(groupTypes);
+  }
   console.log("Groups:", groups.join(", "));
   console.log("bi_drafts policy: read-only / untouched");
 
   await ingestDatatrackerDocuments(groups, recentDocs);
   await ingestRfcIndex();
   await ingestMeetings(meetings);
-  await ingestMailArchive(groups, mailLimit);
+  await ingestMailArchive(groups, mailLimit, { maxPages: mailPages, delayMs: mailDelayMs });
   await touchSources();
 
   console.log("\nDone.");
@@ -242,34 +251,91 @@ async function ingestMeetings(meetingNumbers) {
   record("datatracker-meetings", uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length + uniqueAgendaRows.length, uniqueMeetings.length + uniqueSessions.length + uniqueMaterials.length + uniqueAgendaRows.length);
 }
 
-async function ingestMailArchive(groupAcronyms, limit) {
-  const rows = [];
+async function ingestMailArchive(groupAcronyms, limit, { maxPages = 1, delayMs = 150 } = {}) {
+  let seen = 0;
+  let upserted = 0;
   for (const group of groupAcronyms) {
     const list = group.toLowerCase();
-    const html = await getTextBestEffort(`https://mailarchive.ietf.org/arch/browse/${list}/`);
-    if (!html) continue;
-    const links = [...html.matchAll(/href="(\/arch\/msg\/[^"]+)"/g)]
-      .map((m) => m[1])
-      .filter((v, i, a) => a.indexOf(v) === i)
-      .slice(0, limit);
-    for (const link of links) {
-      const url = `https://mailarchive.ietf.org${link}`;
-      const page = await getTextBestEffort(url);
-      rows.push(clean({
-        message_id: stableId(url),
-        list_name: list,
-        subject: extractTitle(page) || `Message from ${list}`,
-        sender_name: textBetween(page, "From:", "\n") || null,
-        sender_email: null,
-        sent_at: null,
-        url,
-        snippet: stripHtml(page).slice(0, 900),
-        metadata: { list, link }
-      }));
+    let listSeen = 0;
+    let page = 1;
+    while (page <= maxPages && listSeen < limit) {
+      const html = await getTextBestEffort(mailArchiveBrowseUrl(list, page));
+      if (!html) break;
+      const links = parseMailArchiveLinks(html);
+      const totalPages = parseMailArchiveTotalPages(html);
+      if (!links.length) break;
+
+      const rows = [];
+      for (const link of links) {
+        if (listSeen >= limit) break;
+        const url = `https://mailarchive.ietf.org${link}`;
+        const messagePage = await getTextBestEffort(url);
+        rows.push(clean({
+          message_id: stableId(url),
+          list_name: list,
+          subject: extractTitle(messagePage) || `Message from ${list}`,
+          sender_name: textBetween(messagePage, "From:", "\n") || null,
+          sender_email: null,
+          sent_at: null,
+          url,
+          snippet: stripHtml(messagePage).slice(0, 900),
+          metadata: { list, link }
+        }));
+        listSeen++;
+        if (delayMs) await sleep(delayMs);
+      }
+      const uniqueRows = uniqueBy(rows, (row) => row.message_id);
+      await upsert("mail_messages", uniqueRows, "message_id");
+      seen += uniqueRows.length;
+      upserted += uniqueRows.length;
+      console.log(`  mailarchive ${list}: page ${page}${totalPages ? `/${totalPages}` : ""}, +${uniqueRows.length}, total ${listSeen}`);
+      if (totalPages && page >= totalPages) break;
+      page++;
+      if (delayMs) await sleep(delayMs);
     }
   }
-  await upsert("mail_messages", rows, "message_id");
-  record("mailarchive-json", rows.length, rows.length);
+  record("mailarchive-json", seen, upserted);
+}
+
+async function discoverGroups(types) {
+  const wanted = new Set((types || ["rg"]).map((type) => String(type).toLowerCase()));
+  const urls = [];
+  if (wanted.has("rg") || wanted.has("irtf")) urls.push("https://datatracker.ietf.org/rg/");
+  if (wanted.has("wg") || wanted.has("ietf")) urls.push("https://datatracker.ietf.org/wg/");
+  const found = [];
+  for (const url of urls) {
+    const html = await getTextBestEffort(url);
+    const matches = [
+      ...html.matchAll(/href="\/group\/([a-z0-9-]+)\/"/gi),
+      ...html.matchAll(/href="\/(?:wg|rg)\/([a-z0-9-]+)\/about\/"/gi)
+    ];
+    for (const match of matches) {
+      const acronym = match[1].toLowerCase();
+      if (acronym && !["about", "concluded"].includes(acronym)) found.push(acronym);
+    }
+  }
+  const groups = uniqueBy(found, (group) => group).sort();
+  if (!groups.length) {
+    console.warn("  group discovery returned no groups; using DEFAULT_GROUPS fallback");
+    return DEFAULT_GROUPS;
+  }
+  console.log(`  discovered groups (${[...wanted].join(",")}): ${groups.length}`);
+  return groups;
+}
+
+function mailArchiveBrowseUrl(list, page) {
+  return `https://mailarchive.ietf.org/arch/browse/${encodeURIComponent(list)}/${page > 1 ? `?page=${page}` : ""}`;
+}
+
+function parseMailArchiveLinks(html) {
+  return [...String(html).matchAll(/href="(\/arch\/msg\/[^"]+)"/g)]
+    .map((m) => m[1])
+    .filter((value, index, all) => all.indexOf(value) === index);
+}
+
+function parseMailArchiveTotalPages(html) {
+  const match = String(html).match(/Page\s+\d+\s+of\s+([\d,]+)/i);
+  return match ? Number(match[1].replace(/,/g, "")) || null : null;
 }
 
 async function touchSources() {
@@ -580,6 +646,14 @@ function splitArg(value) {
   return String(value).split(",").map((x) => x.trim()).filter(Boolean);
 }
 
+function parseLimit(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const text = String(value).trim().toLowerCase();
+  if (["all", "todos", "full", "complete", "completo"].includes(text)) return Infinity;
+  const number = Number(text);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
 function record(name, seen, upserted) {
   const prev = sourceStats.get(name) || { seen: 0, upserted: 0 };
   sourceStats.set(name, { seen: prev.seen + seen, upserted: prev.upserted + upserted });
@@ -589,6 +663,10 @@ function chunk(items, size) {
   const out = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function uniqueBy(items, keyFn) {
