@@ -35,6 +35,7 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
 }
 
 let groups = splitArg(args.groups) || DEFAULT_GROUPS;
+let mailArchiveLists = null;
 const groupTypes = splitArg(args["group-types"]) || ["rg"];
 const meetings = splitArg(args.meetings);
 const recentDocs = Number(args["recent-docs"] || 200);
@@ -82,7 +83,9 @@ main().catch((err) => {
 async function main() {
   console.log("Starting Bussola IETF ingestion");
   if (groups.some((group) => String(group).toLowerCase() === "all")) {
-    groups = await discoverGroups(groupTypes);
+    const discovered = await discoverGroups(groupTypes);
+    groups = discovered.map((group) => group.acronym);
+    mailArchiveLists = discovered.map((group) => group.mailList || group.acronym);
   }
   console.log("Groups:", groups.join(", "));
   console.log("bi_drafts policy: read-only / untouched");
@@ -90,7 +93,7 @@ async function main() {
   await ingestDatatrackerDocuments(groups, recentDocs);
   await ingestRfcIndex();
   await ingestMeetings(meetings);
-  await ingestMailArchive(groups, mailLimit, { maxPages: mailPages, delayMs: mailDelayMs });
+  await ingestMailArchive(mailArchiveLists || groups, mailLimit, { maxPages: mailPages, delayMs: mailDelayMs });
   await touchSources();
 
   console.log("\nDone.");
@@ -298,29 +301,69 @@ async function ingestMailArchive(groupAcronyms, limit, { maxPages = 1, delayMs =
 }
 
 async function discoverGroups(types) {
-  const wanted = new Set((types || ["rg"]).map((type) => String(type).toLowerCase()));
-  const urls = [];
-  if (wanted.has("rg") || wanted.has("irtf")) urls.push("https://datatracker.ietf.org/rg/");
-  if (wanted.has("wg") || wanted.has("ietf")) urls.push("https://datatracker.ietf.org/wg/");
-  const found = [];
-  for (const url of urls) {
-    const html = await getTextBestEffort(url);
-    const matches = [
-      ...html.matchAll(/href="\/group\/([a-z0-9-]+)\/"/gi),
-      ...html.matchAll(/href="\/(?:wg|rg)\/([a-z0-9-]+)\/about\/"/gi)
-    ];
-    for (const match of matches) {
-      const acronym = match[1].toLowerCase();
-      if (acronym && !["about", "concluded"].includes(acronym)) found.push(acronym);
-    }
-  }
-  const groups = uniqueBy(found, (group) => group).sort();
+  const wanted = normalizeGroupTypes(types || ["rg"]);
+  const allGroups = await fetchDatatrackerGroups();
+  const groups = uniqueBy(
+    allGroups
+      .map((group) => normalizeDatatrackerGroup(group, wanted))
+      .filter(Boolean),
+    (group) => group.acronym
+  ).sort((a, b) => a.acronym.localeCompare(b.acronym));
   if (!groups.length) {
     console.warn("  group discovery returned no groups; using DEFAULT_GROUPS fallback");
-    return DEFAULT_GROUPS;
+    return DEFAULT_GROUPS.map((acronym) => ({ acronym, mailList: acronym }));
   }
   console.log(`  discovered groups (${[...wanted].join(",")}): ${groups.length}`);
   return groups;
+}
+
+function normalizeGroupTypes(types) {
+  const aliases = {
+    irtf: "rg",
+    research: "rg",
+    researchgroup: "rg",
+    researchgroups: "rg",
+    ietf: "wg",
+    working: "wg",
+    workinggroup: "wg",
+    workinggroups: "wg"
+  };
+  return new Set(types.map((type) => aliases[String(type).toLowerCase()] || String(type).toLowerCase()));
+}
+
+async function fetchDatatrackerGroups() {
+  const rows = [];
+  let url = "https://datatracker.ietf.org/api/v1/group/group/?format=json&limit=1000";
+  let guard = 0;
+  while (url && guard < 10) {
+    const data = await getJsonBestEffort(url);
+    rows.push(...(data.objects || []));
+    url = data.meta?.next ? absoluteDatatracker(data.meta.next) : null;
+    guard++;
+  }
+  return rows;
+}
+
+function normalizeDatatrackerGroup(group, wantedTypes) {
+  const acronym = String(group?.acronym || "").trim().toLowerCase();
+  const type = resourceSlug(group?.type);
+  const state = resourceSlug(group?.state);
+  if (!acronym || !wantedTypes.has(type)) return null;
+  if (["conclude", "concluded"].includes(state)) return null;
+  return {
+    acronym,
+    mailList: mailListFromArchive(group?.list_archive, acronym)
+  };
+}
+
+function resourceSlug(value) {
+  const parts = String(value || "").split("/").filter(Boolean);
+  return (parts[parts.length - 1] || "").toLowerCase();
+}
+
+function mailListFromArchive(value, fallback) {
+  const match = String(value || "").match(/\/arch\/browse\/([^/?#]+)/i);
+  return (match ? decodeURIComponent(match[1]) : fallback).toLowerCase();
 }
 
 function mailArchiveBrowseUrl(list, page) {
