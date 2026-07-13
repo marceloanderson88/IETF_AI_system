@@ -289,6 +289,7 @@ async function touchSources() {
 async function upsert(table, rows, onConflict) {
   if (!rows.length) return;
   for (const batch of chunk(rows, 200)) {
+    const payload = normalizeBatchKeys(batch);
     const url = `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`;
     const res = await fetch(url, {
       method: "POST",
@@ -298,13 +299,18 @@ async function upsert(table, rows, onConflict) {
         "Authorization": `Bearer ${SERVICE_KEY}`,
         "Prefer": "resolution=merge-duplicates,return=minimal"
       },
-      body: JSON.stringify(batch)
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const body = await res.text();
       throw new Error(`Supabase upsert failed for ${table}: ${res.status} ${body}`);
     }
   }
+}
+
+function normalizeBatchKeys(batch) {
+  const keys = [...new Set(batch.flatMap((row) => Object.keys(row)))];
+  return batch.map((row) => Object.fromEntries(keys.map((key) => [key, row[key] ?? null])));
 }
 
 async function getJsonBestEffort(url) {
